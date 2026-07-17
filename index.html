@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>pln to htp translator</title>
+<script src="https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/build/Midi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+body{background:#000;color:#fff;font-family:Arial,sans-serif;margin:40px}
+textarea{width:100%;height:180px;font-size:18px;margin-bottom:20px;background:#000;color:#fff;border:1px solid #555;padding:10px;box-sizing:border-box}
+button{font-size:18px;padding:10px 20px;margin-right:10px}label{display:block;margin-bottom:15px}
+</style></head><body>
+<button id="themeToggle" style="position:absolute;top:10px;right:10px;" onclick="toggleTheme()">White</button>
+<h2> </h2>
+<input type="file" id="midiFile" accept=".mid,.midi,.mxl,.musicxml,.xml">
+<button onclick="loadMidi()">Convert MIDI/MXL</button>
+<hr>
+<h2>Input</h2>
+<textarea id="input" oninput="translateText()"></textarea>
+<label><input type="checkbox" id="reverse" onchange="translateText()"> Reverse translation</label>
+<h2>Output</h2>
+<textarea id="output" readonly></textarea>
+<button onclick="copyOutput()">Copy Output</button>
+<script>
+const dict={
+"c5":"q","c#5":"2","d5":"w","d#5":"3","e5":"e","f5":"r","f#5":"5","g5":"t","g#5":"6","a5":"y","a#5":"7","b5":"u",
+"c6":"i","c4":"z","c#4":"s","d4":"x","d#4":"d","e4":"c","f4":"v","f#4":"g","g4":"b","g#4":"h","a4":"n","a#4":"j","b4":"m",
+"c3":",","c#3":"l","d3":".","d#3":";","e3":"/","f3":"o","f#3":"0","g3":"p","g#3":"-","a3":"[","a#3":"=","b3":"]"
+};
+const reverseDict={}; for(const k in dict) reverseDict[dict[k]]=k;
+function translateText(){
+ const input=document.getElementById("input").value;
+ const rev=document.getElementById("reverse").checked;
+ document.getElementById("output").value=rev?
+ input.replace(/./g,ch=>reverseDict[ch]??ch):
+ input.replace(/[A-Za-z]#?\d/gi,m=>dict[m.toLowerCase()]??m);
+}
+function copyOutput(){navigator.clipboard.writeText(document.getElementById("output").value);}
+function midiNoteName(n){const a=["c","c#","d","d#","e","f","f#","g","g#","a","a#","b"];return a[n%12]+(Math.floor(n/12)-1);}
+function xmlMidi(step,alter,oct){const a={C:0,D:2,E:4,F:5,G:7,A:9,B:11};return (parseInt(oct)+1)*12+a[step]+(parseInt(alter)||0);} function xmlStep(step,alter,oct){return midiNoteName(xmlMidi(step,alter,oct));}
+async function loadMXL(file){
+const name=file.name.toLowerCase();
+let xml;
+if(name.endsWith('.mxl')){
+ const zip=await JSZip.loadAsync(await file.arrayBuffer());
+ for(const k of Object.keys(zip.files)){
+   if(k.endsWith('.xml')){
+     xml=await zip.files[k].async('string');
+     break;
+   }
+ }
+ if(!xml){alert('No MusicXML found.');return;}
+}else{
+ xml=await file.text();
+}const doc=new DOMParser().parseFromString(xml,'application/xml');let out='';let lowest=Infinity,highest=-Infinity;const parts=[...doc.querySelectorAll('part')];parts.forEach((part,pi)=>{[...part.querySelectorAll('measure')].forEach(m=>{let chord='';[...m.children].forEach(n=>{if(n.tagName!=='note'||n.querySelector('rest'))return;const p=n.querySelector('pitch');if(!p)return;const midiNum=xmlMidi(p.querySelector('step').textContent,p.querySelector('alter')?.textContent||0,p.querySelector('octave').textContent);lowest=Math.min(lowest,midiNum);highest=Math.max(highest,midiNum);const t=midiNoteName(midiNum);if(n.querySelector('chord'))chord+=t;else{if(chord)out+=chord+' ';chord=t;}});if(chord)out+=chord+' ';});});document.getElementById('input').value=out.trim();
+function toggleTheme(){
+ const b=document.body;
+ const dark=b.style.backgroundColor!== 'white';
+ if(dark){
+  b.style.backgroundColor='white';b.style.color='black';
+  document.querySelectorAll('textarea').forEach(x=>{x.style.background='white';x.style.color='black';x.style.border='1px solid #555';});
+  document.getElementById('themeToggle').textContent='Black';
+ }else{
+  b.style.backgroundColor='black';b.style.color='white';
+  document.querySelectorAll('textarea').forEach(x=>{x.style.background='black';x.style.color='white';x.style.border='1px solid #555';});
+  document.getElementById('themeToggle').textContent='White';
+ }
+}
+
+translateText();if(lowest<48||highest>84)alert('Your input has notes higher than C6 and/or lower than C3;\n' +
+'Your <3strings can\'t handle getting pulled that hard...!\n' +
+'Please transpose or remove the unplayable notes.');}
+async function loadMidi(){
+ const f=document.getElementById("midiFile").files[0];
+ if(!f){alert("Please choose a .midi/.mxl file.");return;}
+ const name=f.name.toLowerCase();
+ if(name.endsWith('.mxl')||name.endsWith('.musicxml')||name.endsWith('.xml'))
+     return loadMXL(f);
+ const buf=await f.arrayBuffer();
+ const midi=new Midi(buf);
+ let all=[];let lowest=Infinity,highest=-Infinity;
+ for(const tr of midi.tracks){
+   for(const note of tr.notes){
+      if(note.channel===9) continue;
+      lowest=Math.min(lowest,note.midi);highest=Math.max(highest,note.midi);all.push({t:note.time,n:note.midi});
+   }
+ }
+ all.sort((a,b)=>a.t-b.t);
+ const CHORD_THRESHOLD=0.005;
+ let out="";
+ let lastTime=null;
+ for(const x of all){
+   if(lastTime!==null && x.t-lastTime>CHORD_THRESHOLD) out+=" ";
+   out+=midiNoteName(x.n);
+   lastTime=x.t;
+ }
+ document.getElementById("input").value=out;
+ 
+function toggleTheme(){
+ const b=document.body;
+ const dark=b.style.backgroundColor!== 'white';
+ if(dark){
+  b.style.backgroundColor='white';b.style.color='black';
+  document.querySelectorAll('textarea').forEach(x=>{x.style.background='white';x.style.color='black';x.style.border='1px solid #555';});
+  document.getElementById('themeToggle').textContent='Black';
+ }else{
+  b.style.backgroundColor='black';b.style.color='white';
+  document.querySelectorAll('textarea').forEach(x=>{x.style.background='black';x.style.color='white';x.style.border='1px solid #555';});
+  document.getElementById('themeToggle').textContent='White';
+ }
+}
+
+translateText();if(lowest<48||highest>84)alert('Your input has notes higher than C6 and/or lower than C3;\n' +
+'Your <3strings can\'t handle getting pulled that hard...!\n' +
+'Please transpose or remove the unplayable notes.');
+}
+
+function toggleTheme(){
+ const b=document.body;
+ const dark=b.style.backgroundColor!== 'white';
+ if(dark){
+  b.style.backgroundColor='white';b.style.color='black';
+  document.querySelectorAll('textarea').forEach(x=>{x.style.background='white';x.style.color='black';x.style.border='1px solid #555';});
+  document.getElementById('themeToggle').textContent='Black';
+ }else{
+  b.style.backgroundColor='black';b.style.color='white';
+  document.querySelectorAll('textarea').forEach(x=>{x.style.background='black';x.style.color='white';x.style.border='1px solid #555';});
+  document.getElementById('themeToggle').textContent='White';
+ }
+}
+
+translateText();
+</script>
+<p>
+<br>
+<br>
+creds<br>
+chatgpt - 全て<br>
+甜心 - c lintention ki compte mdr<br>
+X.D Network - making such a wonderful game<br>
+Nelly - Herzensfreundin<br>
+</p>
+</body></html>
